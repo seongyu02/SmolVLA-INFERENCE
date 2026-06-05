@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>e6_description</name>
+  <version>0.1.0</version>
+  <description>Dobot ME6 robot description and joint state visualization bridge</description>
+  <maintainer email="gkdbqls889@kangnam.ac.kr">billye6</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>robot_state_publisher</depend>
+  <depend>xacro</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

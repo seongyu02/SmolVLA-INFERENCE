@@ -1,0 +1,6 @@
+build/
+install/
+log/
+ZED_Diagnostic_Results.json
+**/__pycache__/
+**/*.pyc
