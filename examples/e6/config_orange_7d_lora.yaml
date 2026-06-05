@@ -1,0 +1,32 @@
+# SmolVLA Orange 7D LoRA — 단일 문장 추론 (권장)
+# Usage:
+#   Terminal 1: bash scripts/run_server_7d_lora.sh
+#   Terminal 2: bash scripts/run_client_7d_lora.sh
+
+model_path: "/media/billye6/새 볼륨/Dobot/SmolVLA_outputs_orange_v2_lora/smolvla_orange_v2_7d_lora_r21_from_expert100k/checkpoints/020000/pretrained_model"
+server_port: 8002
+
+robot_ip: "192.168.5.1"
+
+# 모델에 입력되는 고정 자연어 지시 (학습 데이터와 동일)
+task: "pick up the orange box from the left side and place it on the right side"
+
+# 단일 문장 모드: task_sequence 없음 → FSM 없이 동일 문장으로 추론 반복
+# 종료: max_runtime_sec 초과 또는 Ctrl+C (0 = 무제한)
+max_runtime_sec: 120
+
+# 제어
+hz: 16
+steps_per_inference: 10
+movj_velocity: 30
+movj_accel: 20
+max_delta_deg: 3
+
+# 안전
+min_tool_z: 80
+approach_z_done: 100
+lift_z_done: 200
+
+# 초기 자세 (false = e6_v1 초기자세로 이동)
+skip_init_pose: false
+init_pose_version: "e6_v1"
