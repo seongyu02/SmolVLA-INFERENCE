@@ -28,8 +28,8 @@ def generate_launch_description():
         DeclareLaunchArgument("no_camera",         default_value="false"),
         DeclareLaunchArgument("max_delta_deg",     default_value="3.0"),
         DeclareLaunchArgument("min_tool_z",        default_value="75.0"),
-        DeclareLaunchArgument("steps_per_inference", default_value="1"),   # SmolVLA: 1스텝씩 재추론
-        DeclareLaunchArgument("executor_hz",       default_value="10.0"),   # SmolVLA 기본 10Hz
+        DeclareLaunchArgument("steps_per_inference", default_value="10"),
+        DeclareLaunchArgument("executor_hz",       default_value="16.0"),
         DeclareLaunchArgument("approach_z_done",   default_value="85.0"),
         DeclareLaunchArgument("lift_z_done",       default_value="200.0"),
         DeclareLaunchArgument("stage_done_steps",  default_value="3"),
