@@ -202,12 +202,6 @@ def generate_launch_description():
         ),
 
         Node(
-            package="e6_description",
-            executable="joint_state_bridge_node.py",
-            name="joint_state_bridge",
-        ),
-
-        Node(
             package="foxglove_bridge",
             executable="foxglove_bridge",
             name="foxglove_bridge",
