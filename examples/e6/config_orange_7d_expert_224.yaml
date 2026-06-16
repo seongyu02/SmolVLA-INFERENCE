@@ -3,7 +3,7 @@
 #   Terminal 1: bash scripts/run_server_7d_expert_224.sh
 #   Terminal 2: bash scripts/run_client_7d_expert_224.sh
 
-model_path: "/media/billy/??蹂쇰ⅷ4/Dobot/SmolVLA_outputs_orange_v3/smolvla_orange_v3_224_7d_chunk50_action10_100000steps/checkpoints/100000/pretrained_model"
+model_path: "/media/billy/새 볼륨4/Dobot/SmolVLA_outputs_orange_v3/smolvla_orange_v3_224_7d_chunk50_action10_100000steps/checkpoints/100000/pretrained_model"
 server_port: 8003
 
 robot_ip: "192.168.5.1"

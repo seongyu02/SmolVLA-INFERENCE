@@ -1,20 +1,10 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
-SmolVLA 7D 異붾줎 ?쒕쾭 (FastAPI)
+SmolVLA 7D inference server for the 224px Orange v3 checkpoint.
 
-E6-VLA_INFERENCE/scripts/serve_policy.py ? ?숈씪????븷:
-  - SmolVLA 7D 紐⑤뜽??濡쒕뱶?섍퀬 HTTP ?쒕쾭濡??쒕튃
-  - ?대씪?댁뼵??run_smolvla_client_7d_224.py)媛 POST /act 濡?愿痢≪쓣 蹂대궡怨??≪뀡??諛쏆쓬
-
-?ъ슜踰?(Terminal 1):
-  source ~/SmolVLA/.venv_SmolVLA310/bin/activate
-  cd ~/SmolVLA/SmolVLA-INFERENCE
-  bash scripts/run_server_7d_expert_224.sh
-  ?먮뒗
-  python scripts/serve_policy_smolvla_7d_224.py --model-path MODEL_PATH --port 8003
-
-?꾪궎?띿쿂:
-  [serve_policy_smolvla_7d_224.py] ??HTTP POST /act ??[run_smolvla_client_7d_224.py] ??Dobot E6
+The client sends 224x224 RGB camera frames to POST /act. The loaded
+LeRobot SmolVLA policy then applies its checkpoint config internally,
+including resize_imgs_with_padding=[512, 512] when present.
 """
 from __future__ import annotations
 
@@ -31,7 +21,6 @@ import numpy as np
 import torch
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 from PIL import Image
 from pydantic import BaseModel
 
@@ -41,16 +30,14 @@ log = logging.getLogger(__name__)
 STATE_DIM = 7
 ACTION_DIM = 7
 
-# ?? 紐⑤뜽 寃쎈줈 湲곕낯媛?(7D Expert) ???????????????????????????????????????????????
 DEFAULT_MODEL_PATH = (
-    "/media/billy/??蹂쇰ⅷ4/Dobot/SmolVLA_outputs_orange_v3/"
+    "/media/billy/새 볼륨4/Dobot/SmolVLA_outputs_orange_v3/"
     "smolvla_orange_v3_224_7d_chunk50_action10_100000steps/checkpoints/100000/pretrained_model"
 )
 EXPERT_7D_BASE_PATH = DEFAULT_MODEL_PATH
 SAFETENSORS_SINGLE_FILE = "model.safetensors"
 IMG_SIZE = (224, 224)
 
-# ?? FastAPI ??/ ?꾩뿭 ?뺤콉 ????????????????????????????????????????????????????
 app = FastAPI(title="SmolVLA 7D Policy Server")
 _policy = None
 _preprocessor = None
@@ -61,25 +48,25 @@ _act_call_count = 0
 
 
 class ActRequest(BaseModel):
-    state: List[float]         # 7D
-    image1_b64: str            # base64 PNG, (224,224,3) uint8 RGB ??OBS_IMAGE_1 (HIK)
-    image2_b64: str            # base64 PNG, (224,224,3) uint8 RGB ??OBS_IMAGE_2 (ZED)
-    task: str                  # ?먯뿰??吏??臾몄옣
+    state: List[float]
+    image1_b64: str
+    image2_b64: str
+    task: str
 
 
 class ActResponse(BaseModel):
-    actions: List[List[float]] # shape (n_action_steps, 7)
+    actions: List[List[float]]
 
 
 def _b64_to_tensor(b64str: str) -> torch.Tensor:
-    """base64 PNG ??(1, 3, H, W) float32 [0,1] tensor on _device."""
+    """Decode a base64 PNG to a (1, 3, 224, 224) float32 tensor."""
     data = base64.b64decode(b64str)
     img = Image.open(io.BytesIO(data)).convert("RGB")
     if img.size != IMG_SIZE:
         img = img.resize(IMG_SIZE, Image.LANCZOS)
-    arr = np.asarray(img, dtype=np.float32) / 255.0  # (H,W,3)
-    t = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0)  # (1,3,H,W)
-    return t.to(_device)
+    arr = np.asarray(img, dtype=np.float32) / 255.0
+    tensor = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0)
+    return tensor.to(_device)
 
 
 @app.get("/healthz")
@@ -137,7 +124,11 @@ def act(req: ActRequest):
     log.info(
         "[7D] /act timing decode=%.0fms preprocess=%.0fms predict=%.0fms "
         "postproc=%.0fms total=%.0fms",
-        decode_ms, preprocess_ms, predict_ms, postproc_ms, total_ms,
+        decode_ms,
+        preprocess_ms,
+        predict_ms,
+        postproc_ms,
+        total_ms,
     )
 
     actions_np = actions_t.detach().float().cpu().numpy()
@@ -154,8 +145,11 @@ def act(req: ActRequest):
         log.info("[7D] inference input state shape=%s", state.shape)
         log.info("[7D] inference output action shape=%s", actions_np.shape)
         log.info("[7D] first action=%s", np.round(actions_np[0], 4).tolist())
-        log.info("[7D] gripper step0=%.3f step9=%.3f",
-                 float(actions_np[0, 6]), float(actions_np[min(9, len(actions_np) - 1), 6]))
+        log.info(
+            "[7D] gripper step0=%.3f step9=%.3f",
+            float(actions_np[0, 6]),
+            float(actions_np[min(9, len(actions_np) - 1), 6]),
+        )
     _act_call_count += 1
 
     return ActResponse(actions=actions_np.tolist())
@@ -172,9 +166,7 @@ def _resolve_base_model_path(base_path: str) -> str:
             if path != base_path:
                 log.warning("[7D LoRA] base model path corrected: %s -> %s", base_path, path)
             return path
-    raise FileNotFoundError(
-        f"LoRA base model not found. Tried: {candidates}"
-    )
+    raise FileNotFoundError(f"LoRA base model not found. Tried: {candidates}")
 
 
 def load_model(model_path: str) -> None:
@@ -194,11 +186,11 @@ def load_model(model_path: str) -> None:
 
     _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     _resolved_model_path = model_path
-    log.info("?붾컮?댁뒪: %s", _device)
+    log.info("device: %s", _device)
     log.info("[7D] state_dim=%d", STATE_DIM)
     log.info("[7D] expected_action_dim=%d", ACTION_DIM)
     log.info("[7D] model_path=%s", model_path)
-    log.info("紐⑤뜽 濡쒕뵫: %s", model_path)
+    log.info("loading model: %s", model_path)
 
     model_dir = Path(model_path)
     full_weights = model_dir / SAFETENSORS_SINGLE_FILE
@@ -216,7 +208,10 @@ def load_model(model_path: str) -> None:
         log.info("[7D LoRA] loading adapter: %s", model_path)
         base_policy = SmolVLAPolicy.from_pretrained(base_path)
         _policy = PeftModel.from_pretrained(
-            base_policy, model_path, config=peft_config, is_trainable=False,
+            base_policy,
+            model_path,
+            config=peft_config,
+            is_trainable=False,
         )
         log.info("[7D LoRA] PEFT adapter loaded")
     else:
@@ -243,41 +238,48 @@ def load_model(model_path: str) -> None:
         to_output=transition_to_policy_action,
     )
     log.info(
-        "[7D] pre/post processor loaded (n_action_steps=%s)",
+        "[7D] pre/post processor loaded (n_action_steps=%s, resize_imgs_with_padding=%s)",
         getattr(policy_cfg, "n_action_steps", "?"),
+        getattr(policy_cfg, "resize_imgs_with_padding", "?"),
     )
-    log.info("SmolVLA 7D 濡쒕뱶 ?꾨즺 (device=%s)", _device)
+    log.info("SmolVLA 7D loaded (device=%s)", _device)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="SmolVLA 7D 異붾줎 ?쒕쾭 (E6-VLA serve_policy.py ?명솚 ??븷)"
+        description="SmolVLA 7D inference server for Dobot E6"
     )
     parser.add_argument(
-        "--model-path", "--policy-dir", dest="model_path",
+        "--model-path",
+        "--policy-dir",
+        dest="model_path",
         default=DEFAULT_MODEL_PATH,
-        help="SmolVLA pretrained_model ?대뜑 寃쎈줈",
+        help="Path to the SmolVLA pretrained_model directory",
     )
     parser.add_argument("--port", type=int, default=8003)
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--check-only", action="store_true",
-                        help="紐⑤뜽 濡쒕뱶 ?뺤씤 ??醫낅즺 (?쒕쾭 誘몄떆??")
+    parser.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Load the model and exit without starting the server",
+    )
     args, _ = parser.parse_known_args()
 
     model_path = Path(args.model_path).expanduser()
     if (model_path / "pretrained_model").is_dir():
         model_path = model_path / "pretrained_model"
     if not model_path.exists():
-        print(f"[ERROR] 紐⑤뜽 寃쎈줈 ?놁쓬: {model_path}")
+        print(f"[ERROR] model path does not exist: {model_path}")
         sys.exit(1)
 
     load_model(str(model_path))
 
     if args.check_only:
-        log.info("[OK] 紐⑤뜽 ?뺤씤 ?꾨즺 (--check-only 紐⑤뱶, ?쒕쾭 誘몄떆??")
+        log.info("[OK] model load check complete (--check-only)")
         return
 
     import socket  # pylint: disable=import-outside-toplevel
+
     hostname = socket.gethostname()
     try:
         local_ip = socket.gethostbyname(hostname)
@@ -285,7 +287,7 @@ def main() -> None:
         local_ip = "N/A"
 
     print("============================================")
-    print(" SmolVLA 7D ?뺤콉 ?쒕쾭")
+    print(" SmolVLA 7D policy server")
     print(f" model : {model_path}")
     print(f" host  : {args.host}  port: {args.port}")
     print(f" local IP: {local_ip}")
@@ -298,4 +300,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
