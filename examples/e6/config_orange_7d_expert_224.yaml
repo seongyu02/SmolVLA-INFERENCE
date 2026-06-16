@@ -1,0 +1,28 @@
+﻿# SmolVLA Orange 7D Expert 224 single-sentence inference.
+# Usage:
+#   Terminal 1: bash scripts/run_server_7d_expert_224.sh
+#   Terminal 2: bash scripts/run_client_7d_expert_224.sh
+
+model_path: "/media/billy/??蹂쇰ⅷ4/Dobot/SmolVLA_outputs_orange_v3/smolvla_orange_v3_224_7d_chunk50_action10_100000steps/checkpoints/100000/pretrained_model"
+server_port: 8003
+
+robot_ip: "192.168.5.1"
+
+# Must match the task string used during dataset conversion/training.
+task: "pick up the orange box from the left side and place it on the right side"
+
+max_runtime_sec: 120
+
+hz: 16
+steps_per_inference: 10
+movj_velocity: 30
+movj_accel: 20
+max_delta_deg: 3
+
+min_tool_z: 80
+approach_z_done: 100
+lift_z_done: 200
+
+skip_init_pose: false
+init_pose_version: "e6_v1"
+
