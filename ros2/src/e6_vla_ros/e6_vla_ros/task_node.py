@@ -265,6 +265,13 @@ class TaskNode(Node):
         self.declare_parameter("source_side", "left")
         self.declare_parameter("target_side", "right")
 
+        # per_frame_v16 물체 명사 교체 (기본 "orange box" 유지; 예: "red block")
+        # 발행 직전 prompt 의 "orange box" → object_name 으로만 치환 (V16_PHASE_PROMPTS 원본 보존)
+        self.declare_parameter("object_name", "orange box")
+        # per_frame_v16 방향 문구 제거 (True면 "on the left side"/"to the right section" 등 접미사 삭제)
+        # → "approach the red block" 처럼 방향 없는 phase 프롬프트 발행 (single 아님, phase 구조 유지)
+        self.declare_parameter("omit_direction", False)
+
         # per_frame 모드 전용 파라미터
         self.declare_parameter("z_lift", 180.0)
         self.declare_parameter("grip_threshold", 0.5)
@@ -335,6 +342,8 @@ class TaskNode(Node):
         elif self._prompt_mode == "per_frame_v16":
             self._source_side = self.get_parameter("source_side").value
             self._target_side = self.get_parameter("target_side").value
+            self._object_name = (self.get_parameter("object_name").value or "orange box").strip()
+            self._omit_direction = bool(self.get_parameter("omit_direction").value)
 
             self._phase_tracker = PhaseTracker(
                 z_lift=self.get_parameter("z_lift").value,
@@ -356,6 +365,7 @@ class TaskNode(Node):
             self.get_logger().info(
                 f"task_node 시작 (per_frame_v16) — "
                 f"source={self.get_parameter('source_side').value} "
+                f"object='{self._object_name}' omit_direction={self._omit_direction} "
                 f"z_lift={self.get_parameter('z_lift').value}mm "
                 f"phase_hz={phase_hz}"
             )
@@ -469,6 +479,20 @@ class TaskNode(Node):
         phase = self._phase_tracker.update(self._latest_gripper, self._latest_tcp_z)
         key = _V16_PHASE_KEY.get(phase, "release")
         prompt = V16_PHASE_PROMPTS[self._source_side][key]
+        # 물체 명사만 치환 ("orange box" → object_name). 기본값이면 no-op.
+        obj = getattr(self, "_object_name", "orange box")
+        if obj and obj != "orange box":
+            prompt = prompt.replace("orange box", obj)
+        # 방향 문구 제거 (omit_direction=True). 접미사만 잘라내 phase 구조는 유지.
+        if getattr(self, "_omit_direction", False):
+            for _suf in (
+                " on the left side", " on the right side",
+                " to the left section", " to the right section",
+                " in the left section", " in the right section",
+            ):
+                if prompt.endswith(_suf):
+                    prompt = prompt[: -len(_suf)]
+                    break
         task_id = self._V16_TASK_ID.get(self._source_side, {}).get(key, -1)
 
         if not hasattr(self, "_last_v16_key") or self._last_v16_key != key:
