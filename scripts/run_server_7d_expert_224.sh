@@ -15,7 +15,7 @@ fi
 VENV_ACTIVATE="$VENV_ROOT/bin/activate"
 VENV_PYTHON="$VENV_ROOT/bin/python"
 
-DEFAULT_MODEL="/media/billy/새 볼륨4/Dobot/SmolVLA_outputs_orange_v3/smolvla_orange_v3_224_7d_chunk50_action10_100000steps/checkpoints/100000/pretrained_model"
+DEFAULT_MODEL="/media/billye6/새 볼륨1/Dobot/SmolVLA_outputs_orange_v3/smolvla_orange_v3_224_7d_chunk50_action10_100000steps/checkpoints/100000/pretrained_model"
 MODEL_DIR="${1:-$DEFAULT_MODEL}"
 
 if [ ! -d "$MODEL_DIR" ]; then

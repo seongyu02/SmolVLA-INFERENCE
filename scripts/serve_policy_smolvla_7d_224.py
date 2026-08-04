@@ -31,12 +31,12 @@ STATE_DIM = 7
 ACTION_DIM = 7
 
 DEFAULT_MODEL_PATH = (
-    "/media/billy/새 볼륨4/Dobot/SmolVLA_outputs_orange_v3/"
+    "/media/billye6/새 볼륨1/Dobot/SmolVLA_outputs_orange_v3/"
     "smolvla_orange_v3_224_7d_chunk50_action10_100000steps/checkpoints/100000/pretrained_model"
 )
 EXPERT_7D_BASE_PATH = DEFAULT_MODEL_PATH
 SAFETENSORS_SINGLE_FILE = "model.safetensors"
-IMG_SIZE = (224, 224)
+IMG_SIZE = (512, 512)
 
 app = FastAPI(title="SmolVLA 7D Policy Server")
 _policy = None

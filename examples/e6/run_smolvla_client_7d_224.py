@@ -10,8 +10,8 @@ openpi WebsocketClientPolicy 대신 HTTP POST /act 로 SmolVLA 7D 서버에 연�
 
 관측 계약 (SmolVLA 7D):
   observation.state                : (7,) float32 — [j1..j6 deg, gripper_state]
-  observation.images.OBS_IMAGE_1   : (224, 224, 3) uint8 RGB — HIK 탑뷰
-  observation.images.OBS_IMAGE_2   : (224, 224, 3) uint8 RGB — ZED 좌측 (없으면 zeros)
+  observation.images.OBS_IMAGE_1   : (512, 512, 3) uint8 RGB — HIK 탑뷰
+  observation.images.OBS_IMAGE_2   : (512, 512, 3) uint8 RGB — ZED 좌측 (없으면 zeros)
   task                             : str — 자연어 지시 문장
 
 액션 계약 (SmolVLA 7D):
@@ -56,7 +56,7 @@ except ImportError:
 
 
 # ── 이미지 상수 ────────────────────────────────────────────────────────────────
-IMG_SIZE = (224, 224)
+IMG_SIZE = (512, 512)
 
 
 # ── 기본값 ─────────────────────────────────────────────────────────────────────
@@ -104,49 +104,35 @@ def _stage_complete(
     return False
 
 
-# ── ZED 프레임 읽기 ────────────────────────────────────────────────────────────
-def _resize_like_training(rgb: np.ndarray) -> np.ndarray:
-    """Return the 224x224 RGB image expected by the 224 dataset/model."""
-    arr = np.asarray(rgb, dtype=np.uint8)
-    if arr.ndim == 2:
-        arr = np.stack([arr] * 3, axis=-1)
-    if arr.shape[-1] == 4:
-        arr = arr[:, :, :3]
-    if arr.shape[:2] == IMG_SIZE and arr.shape[-1] == 3:
-        return arr
-
-    image_mod = _pil_Image()
-    pil = image_mod.fromarray(arr).convert("RGB")
-    try:
-        resample = image_mod.Resampling.LANCZOS
-    except AttributeError:
-        resample = image_mod.LANCZOS
-    return np.asarray(pil.resize(IMG_SIZE, resample), dtype=np.uint8)
+# ── 이미지 전처리 (학습 변환 파이프라인과 동일: 640×480 → crop → 512×512) ──────
+def _preprocess_hik_512(raw640_rgb: np.ndarray) -> np.ndarray:
+    """640×480 RGB → crop[0:480, 94:574] → 480×480 → 512×512 RGB.
+    학습 convert_dobot_to_lerobot의 HIK 크롭과 동일."""
+    arr = np.asarray(raw640_rgb, dtype=np.uint8)
+    if arr.shape[:2] != (480, 640):
+        arr = cv2.resize(arr, (640, 480))
+    crop = arr[0:480, 94:574]  # 480×480
+    return cv2.resize(crop, IMG_SIZE).astype(np.uint8)
 
 
 _last_zed_frame: np.ndarray | None = None
 
 
-def _preprocess_zed_like_training(rgb: np.ndarray) -> np.ndarray:
-    """ZED left view -> 224x224 RGB using the raw-data collection crop pipeline."""
-    arr = np.asarray(rgb, dtype=np.uint8)
-    if arr.ndim == 2:
-        arr = np.stack([arr] * 3, axis=-1)
-    if arr.shape[-1] == 4:
-        arr = arr[:, :, :3]
-    if arr.shape[:2] == IMG_SIZE and arr.shape[-1] == 3:
-        return arr
-
-    # Raw ZED collection path:
-    # HD1080 -> 640x480 -> crop[120:480, 150:510] -> 224x224.
-    arr = cv2.resize(arr, (640, 480))
-    arr = arr[120:480, 150:510]
-    arr = cv2.resize(arr, IMG_SIZE)
-    return arr.astype(np.uint8)
+def _preprocess_zed_512(raw_bgra: np.ndarray) -> np.ndarray:
+    """ZED HD raw → 640×480 → crop[0:480, 80:560] → 480×480 → 512×512 RGB.
+    학습 convert_dobot_to_lerobot의 ZED 크롭과 동일."""
+    arr = np.asarray(raw_bgra, dtype=np.uint8)
+    if arr.ndim == 3 and arr.shape[2] == 4:
+        arr = arr[:, :, :3]  # BGRA → BGR
+    if arr.shape[:2] != (480, 640):
+        arr = cv2.resize(arr, (640, 480))
+    crop = arr[0:480, 80:560]  # 480×480
+    crop = cv2.resize(crop, IMG_SIZE)
+    return cv2.cvtColor(crop, cv2.COLOR_BGR2RGB).astype(np.uint8)
 
 
 def _read_zed_frame(zed, zed_mat) -> np.ndarray:
-    """ZED -> 224x224 RGB, matching the raw-data collection crop pipeline."""
+    """ZED → 512×512 RGB, matching training crop pipeline."""
     global _last_zed_frame
     if zed is None or zed_mat is None:
         return (
@@ -158,8 +144,8 @@ def _read_zed_frame(zed, zed_mat) -> np.ndarray:
         import pyzed.sl as sl  # type: ignore
         if zed.grab() == sl.ERROR_CODE.SUCCESS:
             zed.retrieve_image(zed_mat, sl.VIEW.LEFT)
-            frame = zed_mat.get_data()[:, :, :3][:, :, ::-1].copy()  # BGRA→RGB
-            _last_zed_frame = _preprocess_zed_like_training(frame)
+            frame = zed_mat.get_data()  # BGRA
+            _last_zed_frame = _preprocess_zed_512(frame)
             return _last_zed_frame
     except Exception as exc:
         print(f"  [ZED] 읽기 실패: {exc}")
@@ -170,10 +156,11 @@ def _read_zed_frame(zed, zed_mat) -> np.ndarray:
     )
 
 
-# ── 이미지 전처리 ──────────────────────────────────────────────────────────────
-def _preprocess_hik(frame_rgb: np.ndarray) -> np.ndarray:
-    """HIK -> 224x224 RGB. CameraCapture already applies the training crop pipeline."""
-    return _resize_like_training(frame_rgb)
+def _preprocess_hik(camera) -> np.ndarray:
+    """HIK 카메라 → 512×512 RGB. get_frame()으로 캡처 후 raw640으로 학습 크롭 적용."""
+    _ = camera.get_frame()  # 캡처 트리거 및 raw640 캐시 갱신
+    raw640 = camera.get_raw640()  # 640×480 RGB
+    return _preprocess_hik_512(raw640)
 
 
 def _to_b64png(rgb: np.ndarray) -> str:
@@ -240,9 +227,9 @@ class SmolVLAHttpPolicy:
                        np.zeros((*IMG_SIZE, 3), dtype=np.uint8))
 
         if img1.shape[:2] != IMG_SIZE:
-            img1 = _resize_like_training(img1)
+            img1 = _preprocess_hik_512(img1)
         if img2.shape[:2] != IMG_SIZE:
-            img2 = _preprocess_zed_like_training(img2)
+            img2 = _preprocess_zed_512(img2)
 
         task_text: str = obs.get("task", obs.get("prompt", DEFAULT_TASK_TEXT))
 
@@ -567,11 +554,7 @@ def main() -> None:
 
                 # ── 이미지 수집 ───────────────────────────────────────────────
                 if camera is not None:
-                    frame = camera.get_frame()
-                    if frame is not None:
-                        obs_img = _preprocess_hik(np.asarray(frame, dtype=np.uint8))
-                    else:
-                        obs_img = np.zeros((*IMG_SIZE, 3), dtype=np.uint8)
+                    obs_img = _preprocess_hik(camera)
                 else:
                     obs_img = np.zeros((*IMG_SIZE, 3), dtype=np.uint8)
 
