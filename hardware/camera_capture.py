@@ -144,6 +144,76 @@ class CameraCapture:
             pass
         return False
 
+    def _decode_hik_to_640x480(self):
+        """HIK SDK에서 프레임을 읽어 640×480 RGB로 디코딩. 실패 시 None 반환."""
+        from ctypes import byref, sizeof, memset, c_ubyte
+        from MvImport.MvCameraControl_class import (
+            MV_FRAME_OUT_INFO_EX,
+            PixelType_Gvsp_Mono8,
+            PixelType_Gvsp_RGB8_Packed,
+            PixelType_Gvsp_BGR8_Packed,
+            PixelType_Gvsp_BayerRG8, PixelType_Gvsp_BayerGR8,
+            PixelType_Gvsp_BayerGB8, PixelType_Gvsp_BayerBG8,
+        )
+        import cv2
+        import numpy as np
+
+        buf_size = 2448 * 2048 * 3
+        pData = (c_ubyte * buf_size)()
+        stFrameInfo = MV_FRAME_OUT_INFO_EX()
+        memset(byref(stFrameInfo), 0, sizeof(stFrameInfo))
+        ret = None
+        for attempt in range(5):
+            timeout_ms = 2000 + attempt * 500
+            ret = self._cam.MV_CC_GetOneFrameTimeout(pData, buf_size, stFrameInfo, timeout_ms)
+            if ret == 0:
+                break
+            if attempt < 4:
+                time.sleep(0.2)
+
+        if ret != 0:
+            if not hasattr(self, "_frame_error_printed"):
+                print(f"  [camera_capture] 프레임 읽기 실패 (5회 시도): 0x{ret:x}")
+                self._frame_error_printed = True
+            return None
+
+        image_data = np.frombuffer(pData, dtype=np.uint8, count=stFrameInfo.nFrameLen)
+        h, w = stFrameInfo.nHeight, stFrameInfo.nWidth
+        pt = stFrameInfo.enPixelType
+
+        if not hasattr(self, "_debug_pixel_type_printed"):
+            try:
+                print(f"  [camera_capture] pixelType=0x{int(pt):x}, h={h}, w={w}")
+            except Exception:
+                pass
+            self._debug_pixel_type_printed = True
+
+        if pt == PixelType_Gvsp_RGB8_Packed:
+            img = image_data.reshape(h, w, 3).copy()
+        elif pt == PixelType_Gvsp_BGR8_Packed:
+            img = image_data.reshape(h, w, 3)[:, :, ::-1].copy()
+        elif pt == PixelType_Gvsp_Mono8:
+            img = cv2.cvtColor(image_data.reshape(h, w), cv2.COLOR_GRAY2RGB)
+        elif pt == PixelType_Gvsp_BayerRG8:
+            img = cv2.cvtColor(image_data.reshape(h, w), cv2.COLOR_BayerRG2RGB)
+        elif pt == PixelType_Gvsp_BayerGR8:
+            img = cv2.cvtColor(image_data.reshape(h, w), cv2.COLOR_BayerGB2RGB)
+        elif pt == PixelType_Gvsp_BayerGB8:
+            img = cv2.cvtColor(image_data.reshape(h, w), cv2.COLOR_BayerGB2RGB)
+        elif pt == PixelType_Gvsp_BayerBG8:
+            img = cv2.cvtColor(image_data.reshape(h, w), cv2.COLOR_BayerBG2RGB)
+        else:
+            if image_data.size == h * w:
+                img = cv2.cvtColor(image_data.reshape(h, w), cv2.COLOR_GRAY2RGB)
+            else:
+                img = image_data.reshape(h, w, -1)
+                if img.shape[-1] == 3:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                else:
+                    img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+
+        return cv2.resize(img, (640, 480), interpolation=cv2.INTER_LINEAR)
+
     def get_frame(self):
         """(224, 224, 3) uint8 RGB. 실패 시 이전 프레임 또는 검은 화면."""
         import numpy as np
@@ -170,86 +240,15 @@ class CameraCapture:
                 return frame
 
             # HIKRobot
-            from ctypes import byref, sizeof, memset, c_ubyte
-            from MvImport.MvCameraControl_class import (
-                MV_FRAME_OUT_INFO_EX,
-                PixelType_Gvsp_Mono8,
-                PixelType_Gvsp_RGB8_Packed,
-                PixelType_Gvsp_BGR8_Packed,
-                PixelType_Gvsp_BayerRG8, PixelType_Gvsp_BayerGR8,
-                PixelType_Gvsp_BayerGB8, PixelType_Gvsp_BayerBG8,
-            )
             import cv2
-
-            buf_size = 2448 * 2048 * 3
-            pData = (c_ubyte * buf_size)()
-            stFrameInfo = MV_FRAME_OUT_INFO_EX()
-            memset(byref(stFrameInfo), 0, sizeof(stFrameInfo))
-            # 프레임 읽기 재시도 로직 (최대 5회, 타임아웃 증가)
-            ret = None
-            for attempt in range(5):
-                timeout_ms = 2000 + attempt * 500  # 2초부터 시작해서 점진적으로 증가
-                ret = self._cam.MV_CC_GetOneFrameTimeout(pData, buf_size, stFrameInfo, timeout_ms)
-                if ret == 0:
-                    break
-                if attempt < 4:
-                    time.sleep(0.2)  # 재시도 전 대기
-            
-            if ret != 0:
-                # 프레임 읽기 실패 시 에러 코드 출력 (최초 1회만)
-                if not hasattr(self, "_frame_error_printed"):
-                    print(f"  [camera_capture] 프레임 읽기 실패 (3회 시도): 0x{ret:x}")
-                    self._frame_error_printed = True
-                # 프레임 읽기 실패 시 이전 프레임 반환
+            img = self._decode_hik_to_640x480()
+            if img is None:
                 if self._last_frame is not None:
                     return self._last_frame
                 return np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8)
 
-            image_data = np.frombuffer(pData, dtype=np.uint8, count=stFrameInfo.nFrameLen)
-            h, w = stFrameInfo.nHeight, stFrameInfo.nWidth
-            pt = stFrameInfo.enPixelType
-
-            # 1회만 픽셀 타입 출력
-            if not hasattr(self, "_debug_pixel_type_printed"):
-                try:
-                    print(
-                        f"  [camera_capture] pixelType=0x{int(pt):x}, "
-                        f"h={h}, w={w}, frameLen={stFrameInfo.nFrameLen}"
-                    )
-                except Exception:
-                    pass
-                self._debug_pixel_type_printed = True
-
-            # Packed RGB/BGR/Mono는 명시 처리
-            if pt == PixelType_Gvsp_RGB8_Packed:
-                img = image_data.reshape(h, w, 3)  # 이미 RGB
-            elif pt == PixelType_Gvsp_BGR8_Packed:
-                img = image_data.reshape(h, w, 3)[:, :, ::-1].copy()  # BGR → RGB
-            elif pt == PixelType_Gvsp_Mono8:
-                img = cv2.cvtColor(image_data.reshape(h, w), cv2.COLOR_GRAY2RGB)
-            elif pt == PixelType_Gvsp_BayerRG8:
-                img = cv2.cvtColor(image_data.reshape(h, w), cv2.COLOR_BayerRG2RGB)
-            elif pt == PixelType_Gvsp_BayerGR8:
-                # 일부 HIKRobot 장치에서 BayerGR8이지만 GR↔GB로 해석해야 색상 반전이 해결됨
-                img = cv2.cvtColor(image_data.reshape(h, w), cv2.COLOR_BayerGB2RGB)
-            elif pt == PixelType_Gvsp_BayerGB8:
-                img = cv2.cvtColor(image_data.reshape(h, w), cv2.COLOR_BayerGB2RGB)
-            elif pt == PixelType_Gvsp_BayerBG8:
-                img = cv2.cvtColor(image_data.reshape(h, w), cv2.COLOR_BayerBG2RGB)
-            else:
-                if image_data.size == h * w:
-                    img = cv2.cvtColor(image_data.reshape(h, w), cv2.COLOR_GRAY2RGB)
-                else:
-                    img = image_data.reshape(h, w, -1)
-                    if img.shape[-1] == 3:
-                        # 알 수 없는 3채널은 우선 BGR로 가정 (RGB8_Packed는 위에서 이미 처리)
-                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    else:
-                        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-
             # 학습 수집(robot_server.py)과 동일한 전처리
             # Native → 640×480 → 320×240 → crop[16:240, 55:279] → 224×224
-            img = cv2.resize(img, (640, 480), interpolation=cv2.INTER_LINEAR)
             img = cv2.resize(img, (320, 240), interpolation=cv2.INTER_LINEAR)
             img = img[16:240, 55:279]
             img = np.asarray(img, dtype=np.uint8)
@@ -259,6 +258,34 @@ class CameraCapture:
             if hasattr(self, "_last_frame") and self._last_frame is not None:
                 return self._last_frame
             return np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8)
+
+    def get_raw640(self):
+        """(480, 640, 3) uint8 RGB. 학습 변환(convert_dobot_to_lerobot)과 동일한 640×480 중간 프레임."""
+        import numpy as np
+        try:
+            if self._cam is None:
+                return np.zeros((480, 640, 3), dtype=np.uint8)
+
+            if self._use_cv2:
+                import cv2
+                ok, frame = self._cam.read()
+                if not ok or frame is None:
+                    return np.zeros((480, 640, 3), dtype=np.uint8)
+                frame = np.asarray(frame)
+                if frame.ndim == 2:
+                    frame = np.stack([frame] * 3, axis=-1)
+                elif frame.shape[-1] == 3:
+                    frame = frame[:, :, ::-1].copy()  # BGR → RGB
+                import cv2
+                return np.asarray(cv2.resize(frame, (640, 480), interpolation=cv2.INTER_LINEAR), dtype=np.uint8)
+
+            # HIKRobot
+            img = self._decode_hik_to_640x480()
+            if img is None:
+                return np.zeros((480, 640, 3), dtype=np.uint8)
+            return np.asarray(img, dtype=np.uint8)
+        except Exception:
+            return np.zeros((480, 640, 3), dtype=np.uint8)
 
     def close(self):
         if self._cam is None:
